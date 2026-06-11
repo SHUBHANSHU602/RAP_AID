@@ -2,6 +2,8 @@ const express = require('express');
 const helmet = require('helmet');
 const cors = require('cors');
 const rateLimit = require('express-rate-limit');
+const mongoose = require('mongoose');
+const redis = require('./src/config/redis');
 const requestLogger = require('./src/middleware/requestLogger');
 const logger = require('./src/utils/logger');
 
@@ -16,7 +18,7 @@ app.use(cors({
 
 // Rate limiting
 const limiter = rateLimit({
-  windowMs: 15 * 60 * 1000, // 15 minutes
+  windowMs: 15 * 60 * 1000,
   max: 100,
   message: { success: false, message: 'Too many requests, please try again later.' },
   standardHeaders: true,
@@ -32,14 +34,34 @@ app.use(express.urlencoded({ extended: true }));
 app.use(requestLogger);
 
 // Health check
-app.get('/api/v1/health', (req, res) => {
-  logger.info('Health check hit');
-  res.status(200).json({
-    success: true,
-    message: 'RapidAid server is running',
-    environment: process.env.NODE_ENV,
-    timestamp: new Date().toISOString()
-  });
+app.get('/api/v1/health', async (req, res) => {
+  try {
+    const mongoStatus = mongoose.connection.readyState === 1 ? 'connected' : 'disconnected';
+
+    await redis.ping();
+    const redisStatus = 'connected';
+
+    logger.info('Health check hit');
+    res.status(200).json({
+      success: true,
+      message: 'RapidAid server is running',
+      environment: process.env.NODE_ENV,
+      timestamp: new Date().toISOString(),
+      services: {
+        mongodb: mongoStatus,
+        redis: redisStatus
+      }
+    });
+  } catch (err) {
+    res.status(503).json({
+      success: false,
+      message: 'One or more services are down',
+      services: {
+        mongodb: mongoose.connection.readyState === 1 ? 'connected' : 'disconnected',
+        redis: 'disconnected'
+      }
+    });
+  }
 });
 
 // 404 handler
