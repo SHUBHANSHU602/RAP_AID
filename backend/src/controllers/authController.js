@@ -75,17 +75,31 @@ exports.refreshToken = async (req, res, next) => {
       return next(new AppError('Refresh token required', 400));
     }
 
-    const decoded = jwt.verify(refreshToken, process.env.JWT_REFRESH_SECRET);
-    const accessToken = generateAccessToken(decoded.userId, decoded.role);
+    let decoded;
+    try {
+      decoded = jwt.verify(refreshToken, process.env.JWT_REFRESH_SECRET);
+    } catch (err) {
+      return next(new AppError('Invalid or expired refresh token', 401));
+    }
+
+    const user = await User.findById(decoded.userId);
+    if (!user) {
+      return next(new AppError('User no longer exists', 401));
+    }
+
+    const newAccessToken = generateAccessToken(user._id, user.role);
+    const newRefreshToken = generateRefreshToken(user._id);
 
     res.status(200).json({
       success: true,
-      accessToken
+      accessToken: newAccessToken,
+      refreshToken: newRefreshToken
     });
   } catch (err) {
-    return next(new AppError('Invalid or expired refresh token', 401));
+    next(err);
   }
 };
+
 
 exports.getMe = async (req, res, next) => {
   try {
@@ -96,6 +110,17 @@ exports.getMe = async (req, res, next) => {
     res.status(200).json({
       success: true,
       user
+    });
+  } catch (err) {
+    next(err);
+  }
+};
+
+exports.logout = async (req, res, next) => {
+  try {
+    res.status(200).json({
+      success: true,
+      message: 'Logged out successfully'
     });
   } catch (err) {
     next(err);
