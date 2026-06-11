@@ -32,7 +32,8 @@ app.use(express.urlencoded({ extended: true }));
 
 // Request logger
 app.use(requestLogger);
-
+const authRoutes = require('./src/routes/authRoutes');
+app.use('/api/v1/auth', authRoutes);
 // Health check
 app.get('/api/v1/health', async (req, res) => {
   try {
