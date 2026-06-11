@@ -71,10 +71,30 @@ app.use((req, res) => {
 
 // Global error handler
 app.use((err, req, res, next) => {
-  logger.error(err.message, { stack: err.stack, requestId: req.requestId });
+  logger.error(err.message, {
+    stack: err.stack,
+    requestId: req.requestId,
+    statusCode: err.statusCode
+  });
+
+  if (err.name === 'ValidationError') {
+    return res.status(400).json({
+      success: false,
+      message: Object.values(err.errors).map(e => e.message).join(', ')
+    });
+  }
+
+  if (err.code === 11000) {
+    const field = Object.keys(err.keyValue)[0];
+    return res.status(400).json({
+      success: false,
+      message: `${field} already exists`
+    });
+  }
+
   res.status(err.statusCode || 500).json({
     success: false,
-    message: err.message || 'Internal server error'
+    message: err.isOperational ? err.message : 'Internal server error'
   });
 });
 
