@@ -9,7 +9,8 @@ const mongoose = require('mongoose');
 const redis = require('./src/config/redis');
 const requestLogger = require('./src/middleware/requestLogger');
 const logger = require('./src/utils/logger');
-
+const ambulanceRoutes = require('./src/routes/ambulanceRoutes');
+const hospitalRoutes = require('./src/routes/hospitalRoutes');
 const app = express();
 
 // Security middleware
@@ -33,6 +34,8 @@ app.use('/api', limiter);
 app.use(express.json({ limit: '10kb' }));
 app.use(express.urlencoded({ extended: true }));
 
+app.use('/api/v1/ambulances', ambulanceRoutes);
+app.use('/api/v1/hospitals', hospitalRoutes);
 // Request logger
 app.use(requestLogger);
 const authRoutes = require('./src/routes/authRoutes');
