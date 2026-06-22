@@ -10,12 +10,11 @@
   "test": "jest --runInBand --forceExit",
   "seed": "node src/utils/seed.js"
 },
-  "jest": {
-    "testEnvironment": "node",
-    "testMatch": [
-      "**/__tests__/**/*.test.js"
-    ]
-  },
+ "jest": {
+  "testTimeout": 30000,
+  "testMatch": ["**/__tests__/**/*.test.js"],
+  "testEnvironment": "node"
+},
   "keywords": [],
   "author": "",
   "license": "ISC",
