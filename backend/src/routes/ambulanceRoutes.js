@@ -4,8 +4,17 @@ const Ambulance = require('../models/Ambulance');
 const Hospital = require('../models/Hospital');
 const AppError = require('../utils/AppError');
 const { protect, restrictTo } = require('../middleware/auth');
-
+const {
+  getAllAmbulances,
+  getAmbulanceById,
+  updateAmbulanceStatus,
+} = require('../controllers/ambulanceController');
 router.use(protect);
+
+
+router.get('/', getAllAmbulances);
+router.get('/:id', getAmbulanceById);
+router.patch('/:id/status', restrictTo('ADMIN'), updateAmbulanceStatus);
 
 router.get('/', restrictTo('ADMIN'), async (req, res, next) => {
   try {

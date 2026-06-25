@@ -7,10 +7,15 @@ const cors = require('cors');
 const rateLimit = require('express-rate-limit');
 const mongoose = require('mongoose');
 const redis = require('./src/config/redis');
-const requestLogger = require('./src/middleware/requestLogger');
 const logger = require('./src/utils/logger');
+
+// Route imports
+const requestLogger = require('./src/middleware/requestLogger');
+const authRoutes = require('./src/routes/authRoutes');
 const ambulanceRoutes = require('./src/routes/ambulanceRoutes');
 const hospitalRoutes = require('./src/routes/hospitalRoutes');
+const emergencyRoutes = require('./src/routes/emergencyRoutes');
+
 const app = express();
 
 // Security middleware
@@ -33,34 +38,21 @@ app.use('/api', limiter);
 // Body parsing
 app.use(express.json({ limit: '10kb' }));
 app.use(express.urlencoded({ extended: true }));
-const emergencyRoutes = require('./src/routes/emergencyRoutes');
 
-// With your other route mounts
-app.use('/api/v1/emergency', emergencyRoutes);
-app.use('/api/v1/ambulances', ambulanceRoutes);
-app.use('/api/v1/hospitals', hospitalRoutes);
-// Request logger
+// Request logger — must be before routes
 app.use(requestLogger);
-const authRoutes = require('./src/routes/authRoutes');
-app.use('/api/v1/auth', authRoutes);
+
 // Health check
 app.get('/api/v1/health', async (req, res) => {
   try {
     const mongoStatus = mongoose.connection.readyState === 1 ? 'connected' : 'disconnected';
-
     await redis.ping();
-    const redisStatus = 'connected';
-
-    logger.info('Health check hit');
     res.status(200).json({
       success: true,
       message: 'RapidAid server is running',
       environment: process.env.NODE_ENV,
       timestamp: new Date().toISOString(),
-      services: {
-        mongodb: mongoStatus,
-        redis: redisStatus
-      }
+      services: { mongodb: mongoStatus, redis: 'connected' }
     });
   } catch (err) {
     res.status(503).json({
@@ -73,6 +65,12 @@ app.get('/api/v1/health', async (req, res) => {
     });
   }
 });
+
+// Routes
+app.use('/api/v1/auth', authRoutes);
+app.use('/api/v1/ambulances', ambulanceRoutes);
+app.use('/api/v1/hospitals', hospitalRoutes);
+app.use('/api/v1/emergency', emergencyRoutes);
 
 // 404 handler
 app.use((req, res) => {
