@@ -33,7 +33,10 @@ app.use('/api', limiter);
 // Body parsing
 app.use(express.json({ limit: '10kb' }));
 app.use(express.urlencoded({ extended: true }));
+const emergencyRoutes = require('./src/routes/emergencyRoutes');
 
+// With your other route mounts
+app.use('/api/v1/emergency', emergencyRoutes);
 app.use('/api/v1/ambulances', ambulanceRoutes);
 app.use('/api/v1/hospitals', hospitalRoutes);
 // Request logger
