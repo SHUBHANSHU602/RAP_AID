@@ -1,21 +1,33 @@
 const EmergencySession = require('../models/EmergencySession');
 const AppError = require('../utils/AppError');
-const { validationResult } = require('express-validator');
+const { assignAmbulance } = require('../services/assignmentService');
 
 exports.triggerEmergency = async (req, res, next) => {
   try {
     const { lat, lng, emergencyType, severityLevel } = req.body;
 
+    // Create session in INITIATED state
     const session = await EmergencySession.create({
-     userId: req.user.userId,
+      userId: req.user.userId,
       location: { lat, lng },
       emergencyType,
       severityLevel,
     });
 
+    // Trigger assignment asynchronously — don't block the response
+    assignAmbulance(session._id, lat, lng)
+      .then((result) => {
+        if (result) {
+          console.log(`Assigned ambulance ${result.ambulanceId} in ${result.latency}ms`);
+        }
+      })
+      .catch((err) => {
+        console.error('Assignment failed:', err.message);
+      });
+
     res.status(201).json({
       success: true,
-      message: 'Emergency session created',
+      message: 'Emergency session created — assigning ambulance',
       data: {
         sessionId: session._id,
         status: session.status,
@@ -40,7 +52,6 @@ exports.getSession = async (req, res, next) => {
       return next(new AppError('Session not found', 404));
     }
 
-    // Only the session owner or admin can view it
     if (
       session.userId.toString() !== req.user.userId.toString() &&
       req.user.role !== 'ADMIN'
