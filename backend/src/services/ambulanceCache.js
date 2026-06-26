@@ -1,3 +1,13 @@
+/**
+ * Syncs all ambulance documents from MongoDB to Redis on server boot.
+ * Uses pipeline to batch all writes in a single round trip.
+ * Key structure:
+ *   ambulance:{id}:status   → AVAILABLE | BUSY | OFFLINE
+ *   ambulance:{id}:location → JSON { lat, lng, geohash }
+ *   ambulance:available     → Redis Set of available IDs
+ *
+ * @returns {Promise<number>} Count of ambulances synced
+ */
 const redis = require('../config/redis');
 const Ambulance = require('../models/Ambulance');
 const ngeohash = require('ngeohash');
