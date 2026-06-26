@@ -12,23 +12,22 @@ const AVAILABLE_SET_KEY = 'ambulance:available';
 async function getNearbyAvailableAmbulances(lat, lng, maxCandidates = 10) {
   const targetGeohash = ngeohash.encode(lat, lng, 7);
 
-  // Get target cell + 8 neighbours to handle boundary artifacts
   const neighbours = ngeohash.neighbors(targetGeohash);
-  const searchPrefixes = [targetGeohash.slice(0, 5), ...Object.values(neighbours).map(n => n.slice(0, 5))];
+  const searchPrefixes = [
+    targetGeohash.slice(0, 5),
+    ...Object.values(neighbours).map((n) => n.slice(0, 5)),
+  ];
   const uniquePrefixes = [...new Set(searchPrefixes)];
 
-  // Get all available IDs from Redis Set
   const availableIds = await redis.smembers(AVAILABLE_SET_KEY);
   if (availableIds.length === 0) return [];
 
-  // Fetch all locations in one pipeline
   const pipeline = redis.pipeline();
   for (const id of availableIds) {
     pipeline.get(`ambulance:${id}:location`);
   }
   const results = await pipeline.exec();
 
-  // Filter by geohash prefix match
   const nearby = [];
   for (let i = 0; i < availableIds.length; i++) {
     const raw = results[i][1];
@@ -46,7 +45,6 @@ async function getNearbyAvailableAmbulances(lat, lng, maxCandidates = 10) {
     }
   }
 
-  // Sort by haversine distance first, take top N
   return nearby
     .map((a) => ({
       ...a,
@@ -58,102 +56,107 @@ async function getNearbyAvailableAmbulances(lat, lng, maxCandidates = 10) {
 
 // ── Step 2: Score candidates ──────────────────────────────────────────────
 function scoreCandidate(etaSeconds, distanceKm, lastPingMs) {
-  // Normalize each factor to 0-1 scale (lower = better)
-  const etaScore = Math.min(etaSeconds / 600, 1);       // cap at 10 min
-  const distScore = Math.min(distanceKm / 10, 1);        // cap at 10 km
-  const pingAge = (Date.now() - lastPingMs) / (1000 * 60 * 30); // 30 min cap
+  const etaScore = Math.min(etaSeconds / 600, 1);
+  const distScore = Math.min(distanceKm / 10, 1);
+  const pingAge = (Date.now() - lastPingMs) / (1000 * 60 * 30);
   const pingScore = Math.min(pingAge, 1);
 
-  // Weighted sum — lower is better
   return etaScore * 0.5 + distScore * 0.3 + pingScore * 0.2;
 }
 
 // ── Main assignment function ──────────────────────────────────────────────
 async function assignAmbulance(sessionId, patientLat, patientLng) {
-  const startTime = Date.now();
+  const t = { start: Date.now() };
 
-  // 1. Get nearby available candidates from Redis
+  // Step 1: Redis candidate fetch
   const candidates = await getNearbyAvailableAmbulances(patientLat, patientLng, 10);
+  t.afterRedis = Date.now();
 
   if (candidates.length === 0) {
     logger.warn(`No available ambulances near ${patientLat},${patientLng}`);
     return null;
   }
 
-  // 2. Take top 5 by distance for ETA fetch
   const top5 = candidates.slice(0, 5);
 
-  // 3. Fetch real ETAs from Maps API (one call, all destinations)
-  const etaSeconds = await getETAs(
-    { lat: patientLat, lng: patientLng },
-    top5.map((a) => ({ lat: a.lat, lng: a.lng }))
-  );
+  // Step 2: ETA + MongoDB fetch in parallel
+  const [etaSeconds, ambulanceDocs] = await Promise.all([
+    getETAs(
+      { lat: patientLat, lng: patientLng },
+      top5.map((a) => ({ lat: a.lat, lng: a.lng }))
+    ),
+    Ambulance.find({
+      _id: { $in: top5.map((a) => a.ambulanceId) },
+    }).lean(),
+  ]);
+  t.afterETA = Date.now();
+  t.afterMongo = t.afterETA; // parallel — same moment
 
-  // 4. Fetch ambulance docs for lastPing
-  const ambulanceDocs = await Ambulance.find({
-    _id: { $in: top5.map((a) => a.ambulanceId) },
-  }).lean();
-
+  // Step 3: Build doc map
   const docMap = {};
   for (const doc of ambulanceDocs) {
     docMap[doc._id.toString()] = doc;
   }
 
-  // 5. Score each candidate
+  // Step 4: Score + pick winner
   const scored = top5.map((candidate, i) => {
     const doc = docMap[candidate.ambulanceId];
     const lastPingMs = doc?.lastPing ? new Date(doc.lastPing).getTime() : 0;
-
     return {
       ...candidate,
       etaSeconds: etaSeconds[i],
       score: scoreCandidate(etaSeconds[i], candidate.distanceKm, lastPingMs),
     };
   });
-
-  // 6. Pick lowest score = best candidate
   scored.sort((a, b) => a.score - b.score);
   const best = scored[0];
+  t.afterScoring = Date.now();
 
-  // 7. Assign — update Redis + MongoDB atomically-ish
-  await updateAmbulanceStatus(best.ambulanceId, 'BUSY');
-
-  await Ambulance.findByIdAndUpdate(best.ambulanceId, {
-    assignedSessionId: sessionId,
-    status: 'BUSY',
-  });
-
-  await EmergencySession.findByIdAndUpdate(sessionId, {
-    ambulanceId: best.ambulanceId,
-    $push: {
-      eventLog: {
-        status: 'ASSIGNED',
-        timestamp: new Date(),
-        meta: {
-          ambulanceId: best.ambulanceId,
-          etaSeconds: best.etaSeconds,
-          distanceKm: best.distanceKm,
-          score: best.score,
+  // Step 5: All writes in parallel
+  await Promise.all([
+    updateAmbulanceStatus(best.ambulanceId, 'BUSY'),
+    Ambulance.findByIdAndUpdate(best.ambulanceId, {
+      assignedSessionId: sessionId,
+      status: 'BUSY',
+    }),
+    EmergencySession.findByIdAndUpdate(sessionId, {
+      ambulanceId: best.ambulanceId,
+      status: 'ASSIGNED',
+      $push: {
+        eventLog: {
+          status: 'ASSIGNED',
+          timestamp: new Date(),
+          meta: {
+            ambulanceId: best.ambulanceId,
+            etaSeconds: best.etaSeconds,
+            distanceKm: best.distanceKm,
+            score: best.score,
+          },
         },
       },
-    },
-    status: 'ASSIGNED',
-  });
+    }),
+  ]);
+  t.afterWrite = Date.now();
 
-  const latency = Date.now() - startTime;
-  logger.info(`Ambulance assigned in ${latency}ms`, {
-    sessionId,
-    ambulanceId: best.ambulanceId,
-    etaSeconds: best.etaSeconds,
-    latency,
-  });
+  // Latency breakdown
+  const breakdown = {
+    redis: t.afterRedis - t.start,
+    eta: t.afterETA - t.afterRedis,
+    mongo: t.afterMongo - t.afterETA,
+    scoring: t.afterScoring - t.afterMongo,
+    write: t.afterWrite - t.afterScoring,
+    total: t.afterWrite - t.start,
+  };
+
+  logger.info(`Assignment complete in ${breakdown.total}ms`, breakdown);
 
   return {
     ambulanceId: best.ambulanceId,
     etaSeconds: best.etaSeconds,
     distanceKm: best.distanceKm,
     score: best.score,
-    latency,
+    latency: breakdown.total,
+    breakdown,
   };
 }
 
