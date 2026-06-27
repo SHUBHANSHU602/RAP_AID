@@ -5,7 +5,7 @@ const EmergencySession = require('../models/EmergencySession');
 const { haversineDistance, getETAs } = require('./mapsService');
 const { updateAmbulanceStatus } = require('./ambulanceCache');
 const logger = require('../utils/logger');
-
+const { getIO } = require('../sockets/emergencyRoom');
 const AVAILABLE_SET_KEY = 'ambulance:available';
 
 // ── Step 1: Get nearby candidates from Redis ──────────────────────────────
@@ -137,6 +137,21 @@ async function assignAmbulance(sessionId, patientLat, patientLng) {
     }),
   ]);
   t.afterWrite = Date.now();
+
+  try {
+  const io = getIO();
+  io.to(`session:${sessionId}`).emit('ambulance_assigned', {
+    sessionId,
+    ambulanceId: best.ambulanceId,
+    etaSeconds: best.etaSeconds,
+    distanceKm: best.distanceKm,
+    message: `Ambulance assigned — arriving in approximately ${Math.round(best.etaSeconds / 60)} minutes`,
+  });
+  logger.info(`Emitted ambulance_assigned to session:${sessionId}`);
+} catch (err) {
+  // Don't crash assignment if socket emit fails
+  logger.warn(`Socket emit failed: ${err.message}`);
+}
 
   // Latency breakdown
   const breakdown = {

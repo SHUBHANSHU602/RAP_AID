@@ -8,7 +8,8 @@
     "dev": "nodemon server.js",
     "test": "jest --runInBand --forceExit",
     "seed": "node src/utils/seed.js",
-    "benchmark": "node src/utils/benchmark.js"
+    "benchmark": "node src/utils/benchmark.js",
+    "test:socket": "node src/utils/socketTest.js"
   },
   "jest": {
     "testTimeout": 30000,
@@ -35,6 +36,8 @@
     "jsonwebtoken": "^9.0.3",
     "mongoose": "^9.7.0",
     "ngeohash": "^0.6.3",
+    "socket.io": "^4.8.3",
+    "socket.io-client": "^4.8.3",
     "supertest": "^7.2.2",
     "uuid": "^9.0.1",
     "winston": "^3.19.0"

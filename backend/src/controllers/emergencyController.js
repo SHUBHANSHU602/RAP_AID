@@ -14,16 +14,19 @@ exports.triggerEmergency = async (req, res, next) => {
       severityLevel,
     });
 
-    // Trigger assignment asynchronously — don't block the response
-    assignAmbulance(session._id, lat, lng)
-      .then((result) => {
-        if (result) {
-          console.log(`Assigned ambulance ${result.ambulanceId} in ${result.latency}ms`);
-        }
-      })
-      .catch((err) => {
-        console.error('Assignment failed:', err.message);
-      });
+    // Trigger assignment asynchronously after a short grace period so the client
+    // can join the session room before the assignment event is emitted.
+    setTimeout(() => {
+      assignAmbulance(session._id, lat, lng)
+        .then((result) => {
+          if (result) {
+            console.log(`Assigned ambulance ${result.ambulanceId} in ${result.latency}ms`);
+          }
+        })
+        .catch((err) => {
+          console.error('Assignment failed:', err.message);
+        });
+    }, 500);
 
     res.status(201).json({
       success: true,
