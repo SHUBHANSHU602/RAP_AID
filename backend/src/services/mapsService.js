@@ -55,5 +55,39 @@ async function getETAs(originCoords, destinations) {
     return el.duration_in_traffic?.value || el.duration?.value || Infinity;
   });
 }
+/**
+ * Get ETA in minutes between two lat/lng points.
+ * Uses Google Maps API if key present, haversine fallback at 30km/h otherwise.
+ * @param {number} fromLat
+ * @param {number} fromLng
+ * @param {number} toLat
+ * @param {number} toLng
+ * @returns {Promise<number>} ETA in minutes
+ */
+async function getSingleETA(fromLat, fromLng, toLat, toLng) {
+  if (process.env.GOOGLE_MAPS_API_KEY) {
+    try {
+      const url =
+        `https://maps.googleapis.com/maps/api/distancematrix/json` +
+        `?origins=${fromLat},${fromLng}` +
+        `&destinations=${toLat},${toLng}` +
+        `&key=${process.env.GOOGLE_MAPS_API_KEY}`;
 
-module.exports = { haversineDistance, getETAs };
+      const res = await fetch(url);
+      const data = await res.json();
+      const element = data.rows?.[0]?.elements?.[0];
+
+      if (element?.status === 'OK') {
+        return Math.ceil(element.duration.value / 60); // seconds → minutes
+      }
+    } catch (err) {
+      logger.warn('Google Maps API failed, falling back to haversine', err.message);
+    }
+  }
+
+  // Haversine fallback — assume 30 km/h average speed
+  const distanceKm = haversineDistance(fromLat, fromLng, toLat, toLng);
+  return Math.ceil((distanceKm / 30) * 60); // minutes
+}
+
+module.exports = { haversineDistance, getETAs, getSingleETA };
